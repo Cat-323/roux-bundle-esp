@@ -1,10 +1,16 @@
 {
-  "name": "rain",
+  "name": "rouxcord",
   "private": true,
   "author": {
     "name": "cocobo1",
     "url": "https://cocobo1.dev"
   },
+  "contributors": [
+    {
+      "name": "Cat-323",
+      "url": "https://github.com/Cat-323"
+    }
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "serve": "node scripts/serve.mjs",
