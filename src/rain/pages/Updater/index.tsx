@@ -218,7 +218,7 @@ export default function Updater() {
                     <TableRow
                         arrow
                         label={Strings.GITHUB}
-                        icon={<TableRow.Icon source={{ uri: RainIcon }} />}
+                        icon={<TableRow.Icon source={findAssetId("img_account_sync_github_white")!} />}
                         trailing={<TableRow.TrailingText text={ROUX_REPO} />}
                         onPress={() => Linking.openURL(ROUX_REPO_URL)}
                     />

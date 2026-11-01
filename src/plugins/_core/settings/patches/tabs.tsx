@@ -37,7 +37,7 @@ export function patchTabsUI(unpatches: (() => void | boolean)[]) {
             ...rendererConfigValue,
             RAIN_CUSTOM_PAGE: {
                 type: "route",
-                useTitle: () => "Rain",
+                useTitle: () => "Roux",
                 screen: {
                     route: "RAIN_CUSTOM_PAGE",
                     getComponent: () => CustomPageRenderer

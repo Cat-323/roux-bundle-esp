@@ -32,7 +32,7 @@ export default definePlugin({
 function initSettings() {
     // todo: i18n ALL of settings
     registerSection({
-        name: "Rain",
+        name: "Roux",
         items: [
             {
                 key: "RAIN",
