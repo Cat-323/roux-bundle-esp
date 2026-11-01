@@ -4,23 +4,81 @@ import { BundleUpdaterManager } from "@api/native/modules";
 import UpdateModule from "@api/native/modules/update";
 import { useLoaderConfig, useSettings } from "@api/settings";
 import { openAlert } from "@api/ui/alerts";
-import { CodebergIcon, RainIcon } from "@assets";
+import { RainIcon } from "@assets";
 import { Strings } from "@i18n";
-import { CODEBERG } from "@lib/info";
 import { AlertActionButton, AlertActions, AlertModal, Button, Stack, TableRow, TableRowGroup } from "@metro/common/components";
 import { supportedVersionsAndroid,supportedVersionsIOS } from "rain-build-info";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Linking, Platform, ScrollView, View } from "react-native";
+
+const ROUX_REPO = "Cat-323/roux-bundle-esp";
+export const ROUX_REPO_URL = `https://github.com/${ROUX_REPO}`;
+export const ROUX_RELEASES_URL = `${ROUX_REPO_URL}/releases/latest`;
+export const ROUX_LATEST_RELEASE_API = `https://api.github.com/repos/${ROUX_REPO}/releases/latest`;
+
+const GITHUB_HEADERS = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+};
+
+interface GitHubAsset {
+    name: string;
+    browser_download_url: string;
+}
+
+interface GitHubRelease {
+    tag_name?: string;
+    name?: string;
+    assets?: GitHubAsset[];
+}
 
 let _setIsChecking: ((v: boolean) => void) | null = null;
 
+function parseVersion(version: unknown): [number, number, number] | null {
+    if (typeof version !== "string") return null;
+    const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
 function isNewerVersion(remoteVersion: string, currentVersion: string): boolean {
-    const parseVersion = (version: string) => version.replace(/^v/, "").split(".").map(Number);
-    const [remoteMajor, remoteMinor, remotePatch] = parseVersion(remoteVersion);
-    const [currentMajor, currentMinor, currentPatch] = parseVersion(currentVersion);
-    if (remoteMajor !== currentMajor) return remoteMajor > currentMajor;
-    if (remoteMinor !== currentMinor) return remoteMinor > currentMinor;
-    return remotePatch > currentPatch;
+    const remote = parseVersion(remoteVersion);
+    const current = parseVersion(currentVersion);
+    if (!remote || !current) return false;
+
+    for (let i = 0; i < 3; i++) {
+        if (remote[i] !== current[i]) return remote[i] > current[i];
+    }
+    return false;
+}
+
+/**
+ * Consulta el release 'latest' de GitHub y devuelve su versión.
+ * Como el tag del release es fijo ("latest"), la versión se lee, por orden, de:
+ *   1. info.json adjunto al release (campo "version", si existe)
+ *   2. el nombre del release (p. ej. "RouxCord v0.10.0")
+ *   3. el tag_name
+ */
+async function fetchLatestRemoteVersion(): Promise<string | null> {
+    const response = await fetch(ROUX_LATEST_RELEASE_API, { headers: GITHUB_HEADERS });
+    if (!response.ok) throw new Error(`GitHub API respondió ${response.status}`);
+
+    const release: GitHubRelease = await response.json();
+
+    const infoAsset = release.assets?.find(asset => asset.name === "info.json");
+    if (infoAsset) {
+        try {
+            const info = await (await fetch(infoAsset.browser_download_url)).json();
+            if (parseVersion(info?.version)) return info.version;
+        } catch (e) {
+            console.warn("No se pudo leer info.json del release:", e);
+        }
+    }
+
+    for (const candidate of [release.name, release.tag_name]) {
+        if (parseVersion(candidate)) return candidate as string;
+    }
+
+    return null;
 }
 
 export async function downloadUpdate() {
@@ -59,13 +117,23 @@ export async function downloadUpdate() {
 }
 
 export function checkForUpdate() {
-    const [hasUpdate, setHasUpdate] = React.useState(false);
+    const [hasUpdate, setHasUpdate] = useState(false);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (useLoaderConfig.getState().customLoadUrl.enabled) return;
-        fetch("https://codeberg.org/api/v1/repos/raincord/rain/releases?limit=1")
-            .then(r => r.json())
-            .then(([latestRelease]) => setHasUpdate(!!latestRelease && isNewerVersion(latestRelease.tag_name, getDebugInfo().rain.version)));
+
+        let cancelled = false;
+
+        fetchLatestRemoteVersion()
+            .then(remoteVersion => {
+                if (cancelled || !remoteVersion) return;
+                setHasUpdate(isNewerVersion(remoteVersion, getDebugInfo().rain.version));
+            })
+            .catch(e => console.error("Failed to check for updates:", e));
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     return hasUpdate;
@@ -100,7 +168,7 @@ export function versionCheck() {
                             text={Strings.IPA_DOWNLOAD}
                             variant="primary"
                             onPress={() => {
-                                Linking.openURL("https://codeberg.org/raincord/RainTweak/releases");
+                                Linking.openURL(ROUX_RELEASES_URL);
                             }}
                         />}
                         <AlertActionButton text={Strings.CONTINUE_ANYWAYS} variant="destructive" />
@@ -149,10 +217,10 @@ export default function Updater() {
                     />
                     <TableRow
                         arrow
-                        label={Strings.CODEBERG}
-                        icon={<TableRow.Icon source={{ uri: CodebergIcon }} />}
-                        trailing={<TableRow.TrailingText text="raincord/rain" />}
-                        onPress={() => Linking.openURL(CODEBERG)}
+                        label={Strings.GITHUB}
+                        icon={<TableRow.Icon source={{ uri: RainIcon }} />}
+                        trailing={<TableRow.TrailingText text={ROUX_REPO} />}
+                        onPress={() => Linking.openURL(ROUX_REPO_URL)}
                     />
                 </TableRowGroup>
                 {checkForUpdate() && <View style={{ flexShrink: 1 }}>

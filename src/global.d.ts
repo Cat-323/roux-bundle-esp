@@ -10,6 +10,7 @@ declare global {
         interface Window {
                 [key: string]: any;
                 rain: typeof import("@lib");
+                roux: typeof import("@lib");
         }
 }
 

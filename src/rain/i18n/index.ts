@@ -34,6 +34,10 @@ const languageMap: Record<string, string> = {
     "de-DE": "de",
 };
 
+// Locales que usan SIEMPRE el default.json local (ya traducido al español y con la marca Roux).
+// Cubre "es", "es-ES", "es-419", etc.
+const LOCAL_ONLY_LOCALE = /^es(?:-|$)/i;
+
 function fetchLocale(locale: string) {
     const resolvedLocale = (_lastSetLocale = languageMap[locale] ?? locale);
 
@@ -45,6 +49,11 @@ function fetchLocale(locale: string) {
         if (resolvedLocale.toLowerCase().startsWith("en")) {
             // use local default.json for english
             logger.log("[i18n] Using local default.json for English locale");
+            _loadedStrings[resolvedLocale] = langDefault;
+            _currentLocale = resolvedLocale;
+        } else if (LOCAL_ONLY_LOCALE.test(resolvedLocale)) {
+            // Spanish: skip the remote Codeberg download so the local (translated) strings are never overridden
+            logger.log("[i18n] Using local default.json for Spanish locale, skipping remote fetch");
             _loadedStrings[resolvedLocale] = langDefault;
             _currentLocale = resolvedLocale;
         } else {

@@ -22,7 +22,10 @@ export default async () => {
     critical.forEach(f => { if (f !== undefined) lib.unload.push(f); });
     core.forEach(f => { if (f !== undefined) lib.unload.push(f); });
 
+    // Inicialización nativa intacta: los addons externos siguen usando window.rain
     window.rain = lib;
+    // Alias de la nueva marca
+    window.roux = window.rain;
 
     initDebugger();
 
