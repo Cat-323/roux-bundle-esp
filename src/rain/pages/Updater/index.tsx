@@ -15,6 +15,7 @@ const ROUX_REPO = "Cat-323/roux-bundle-esp";
 export const ROUX_REPO_URL = `https://github.com/${ROUX_REPO}`;
 export const ROUX_RELEASES_URL = `${ROUX_REPO_URL}/releases/latest`;
 export const ROUX_LATEST_RELEASE_API = `https://api.github.com/repos/${ROUX_REPO}/releases/latest`;
+const ROUX_RELEASES_BASE = `${ROUX_REPO_URL}/releases/`;
 
 const GITHUB_HEADERS = {
     Accept: "application/vnd.github+json",
@@ -33,6 +34,20 @@ interface GitHubRelease {
 }
 
 let _setIsChecking: ((v: boolean) => void) | null = null;
+
+/**
+ * True solo si el usuario carga un bundle ajeno a los releases de RouxCord
+ * (p. ej. un servidor de desarrollo local). En ese caso no se comprueban actualizaciones.
+ * Si la URL personalizada apunta a los releases de este repositorio, sí se comprueban.
+ */
+function usesForeignCustomBundle(): boolean {
+    const customLoadUrl = useLoaderConfig.getState().customLoadUrl;
+    if (!customLoadUrl?.enabled) return false;
+
+    const url = customLoadUrl.url;
+    const isRouxRelease = typeof url === "string" && url.toLowerCase().startsWith(ROUX_RELEASES_BASE.toLowerCase());
+    return !isRouxRelease;
+}
 
 function parseVersion(version: unknown): [number, number, number] | null {
     if (typeof version !== "string") return null;
@@ -120,7 +135,7 @@ export function checkForUpdate() {
     const [hasUpdate, setHasUpdate] = useState(false);
 
     useEffect(() => {
-        if (useLoaderConfig.getState().customLoadUrl.enabled) return;
+        if (usesForeignCustomBundle()) return;
 
         let cancelled = false;
 
@@ -146,7 +161,7 @@ export function versionCheck() {
     if (Platform.OS === "android") { supportedVersions = supportedVersionsAndroid; }
     else { supportedVersions = supportedVersionsIOS; }
 
-    if (useLoaderConfig.getState().customLoadUrl?.enabled) return;
+    if (usesForeignCustomBundle()) return;
     if (useSettings.getState().disableUpdateWarnings === true) return;
 
     if (supportedVersions > version) {
