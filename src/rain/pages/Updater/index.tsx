@@ -7,7 +7,7 @@ import { openAlert } from "@api/ui/alerts";
 import { RainIcon } from "@assets";
 import { Strings } from "@i18n";
 import { AlertActionButton, AlertActions, AlertModal, Button, Stack, TableRow, TableRowGroup } from "@metro/common/components";
-import { supportedVersionsAndroid,supportedVersionsIOS } from "rain-build-info";
+import { supportedVersionsAndroid, supportedVersionsIOS } from "rain-build-info";
 import { useEffect, useState } from "react";
 import { Linking, Platform, ScrollView, View } from "react-native";
 
@@ -35,11 +35,6 @@ interface GitHubRelease {
 
 let _setIsChecking: ((v: boolean) => void) | null = null;
 
-/**
- * True solo si el usuario carga un bundle ajeno a los releases de RouxCord
- * (p. ej. un servidor de desarrollo local). En ese caso no se comprueban actualizaciones.
- * Si la URL personalizada apunta a los releases de este repositorio, sí se comprueban.
- */
 function usesForeignCustomBundle(): boolean {
     const customLoadUrl = useLoaderConfig.getState().customLoadUrl;
     if (!customLoadUrl?.enabled) return false;
@@ -55,6 +50,12 @@ function parseVersion(version: unknown): [number, number, number] | null {
     return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
+function extractCleanVersion(version: unknown): string | null {
+    if (typeof version !== "string") return null;
+    const match = version.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+}
+
 function isNewerVersion(remoteVersion: string, currentVersion: string): boolean {
     const remote = parseVersion(remoteVersion);
     const current = parseVersion(currentVersion);
@@ -66,13 +67,6 @@ function isNewerVersion(remoteVersion: string, currentVersion: string): boolean 
     return false;
 }
 
-/**
- * Consulta el release 'latest' de GitHub y devuelve su versión.
- * Como el tag del release es fijo ("latest"), la versión se lee, por orden, de:
- *   1. info.json adjunto al release (campo "version", si existe)
- *   2. el nombre del release (p. ej. "RouxCord v0.10.0")
- *   3. el tag_name
- */
 async function fetchLatestRemoteVersion(): Promise<string | null> {
     const response = await fetch(ROUX_LATEST_RELEASE_API, { headers: GITHUB_HEADERS });
     if (!response.ok) throw new Error(`GitHub API respondió ${response.status}`);
@@ -83,14 +77,16 @@ async function fetchLatestRemoteVersion(): Promise<string | null> {
     if (infoAsset) {
         try {
             const info = await (await fetch(infoAsset.browser_download_url)).json();
-            if (parseVersion(info?.version)) return info.version;
+            const cleanInfoVer = extractCleanVersion(info?.version);
+            if (cleanInfoVer) return cleanInfoVer;
         } catch (e) {
             console.warn("No se pudo leer info.json del release:", e);
         }
     }
 
     for (const candidate of [release.name, release.tag_name]) {
-        if (parseVersion(candidate)) return candidate as string;
+        const clean = extractCleanVersion(candidate);
+        if (clean) return clean;
     }
 
     return null;
@@ -157,7 +153,7 @@ export function checkForUpdate() {
 export function versionCheck() {
     const version = Number(getDebugInfo().discord.build);
 
-    let supportedVersions:number;
+    let supportedVersions: number;
     if (Platform.OS === "android") { supportedVersions = supportedVersionsAndroid; }
     else { supportedVersions = supportedVersionsIOS; }
 
