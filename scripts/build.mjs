@@ -13,6 +13,9 @@ import fs from "fs/promises";
 import { printBuildSuccess, printBytecodeBuildSuccess } from "./util.mjs";
 import { pluginsImporterPlugin } from "./build/plugins/plugins-importer.mjs";
 
+const packageJson = JSON.parse(await fs.readFile("./package.json", "utf-8"));
+const currentVersionString = `v${(packageJson.version || "1.0.1").replace(/^v/, "").trim()}`;
+
 /** @type string[] */
 const metroDeps = await (async () => {
     const ast = await swc.parseFile(path.resolve("./shims/depsModule.ts"));
@@ -38,8 +41,6 @@ const config = {
     splitting: false,
     external: [],
     supported: {
-        // Hermes does not actually support const and let, even though it syntactically
-        // accepts it, but it's treated just like 'var' and causes issues
         "const-and-let": false
     },
     footer: {
@@ -79,7 +80,7 @@ const config = {
                                 constModules: {
                                     globals: {
                                         "rain-build-info": {
-                                            version: `"v1.0.1"`,
+                                            version: JSON.stringify(currentVersionString),
                                             supportedVersionsAndroid: '344013',
                                             supportedVersionsIOS: '110861'
                                         }
@@ -90,8 +91,6 @@ const config = {
                                 }
                             },
                         },
-                        // https://github.com/facebook/hermes/blob/3815fec63d1a6667ca3195160d6e12fee6a0d8d5/doc/Features.md
-                        // https://github.com/facebook/hermes/issues/696#issuecomment-1396235791
                         env: {
                             targets: "fully supports es6",
                             include: [
@@ -168,7 +167,6 @@ async function compileWithHermesc(inputPath, outputPath, options = {}) {
         return false;
     }
 
-    // i basically just searched up the best hermes compilation flags :P
     const flags = options.flags || [
         "-O",
         "-g0",
@@ -179,7 +177,6 @@ async function compileWithHermesc(inputPath, outputPath, options = {}) {
         "-optimized-eval",
     ];
 
-    // -emit-binary and -out are here to stop idiots like me removing them :P
     const cmd = `${hermescPath} ${flags.join(" ")} -emit-binary -out ${outputPath} ${inputPath}`;
 
     try {
@@ -191,13 +188,9 @@ async function compileWithHermesc(inputPath, outputPath, options = {}) {
     }
 }
 
-// make big ints actually work :P
-// bit of a stupid approach, but it works
 async function transformBigIntLiterals(jsPath) {
     let code = await fs.readFile(jsPath, "utf-8");
-
     code = code.replace(/([=:(\[,\s])(\d+)n\b/g, '$1BigInt("$2")');
-
     await fs.writeFile(jsPath, code, "utf-8");
 }
 
@@ -211,22 +204,14 @@ export async function compileToBytecode(jsPath, customOutputPath = null) {
     }
 
     const hbcPath = customOutputPath || jsPath.replace(/\.js$/, `.${hbcVersion}.hbc`);
-
     const tempPath = jsPath.replace(/\.js$/, `.temp.js`);
     await fs.copyFile(jsPath, tempPath);
 
     try {
         await transformBigIntLiterals(tempPath);
-
         const success = await compileWithHermesc(tempPath, hbcPath);
 
         if (success) {
-            var timeTook = performance.now() - startTime;
-
-            const jsStats = await fs.stat(jsPath);
-            const hbcStats = await fs.stat(hbcPath);
-            const reduction = ((1 - hbcStats.size / jsStats.size) * 100).toFixed(1);
-
             return hbcPath;
         }
 
@@ -264,7 +249,7 @@ if (isThisFileBeingRunViaCLI) {
     const { timeTook } = await buildBundle();
     printBuildSuccess(context.hash, releaseBranch, timeTook);
 
-    availablePaths.push(config.outfile);
+    availablePaths.push(path.basename(config.outfile));
     const jsContent = await fs.readFile(config.outfile, "utf-8");
     hash.update(jsContent);
 
@@ -283,13 +268,12 @@ if (isThisFileBeingRunViaCLI) {
         const hbcTimeTook = performance.now() - startTime;
 
         if (bytecodePath) {
-            availablePaths.push(bytecodePath);
+            availablePaths.push(path.basename(bytecodePath));
             const hbcContent = await fs.readFile(bytecodePath);
             hash.update(hbcContent);
         }
 
         printBytecodeBuildSuccess(context.hash, hbcVersion, hbcTimeTook);
-
         await fs.unlink(minOutfileForBytecode);
     }
 
@@ -302,14 +286,14 @@ if (isThisFileBeingRunViaCLI) {
 
         printBuildSuccess(context.hash, releaseBranch, minTimeTook, true);
 
-        availablePaths.push(minOutfile);
+        availablePaths.push(path.basename(minOutfile));
         const minJsContent = await fs.readFile(minOutfile, "utf-8");
         hash.update(minJsContent);
 
         if (buildBytecode) {
             const minBytecodePath = await compileToBytecode(minOutfile);
             if (minBytecodePath) {
-                availablePaths.push(minBytecodePath);
+                availablePaths.push(path.basename(minBytecodePath));
                 const minHbcContent = await fs.readFile(minBytecodePath);
                 hash.update(minHbcContent);
             }
@@ -317,8 +301,6 @@ if (isThisFileBeingRunViaCLI) {
     }
 
     const infoPath = "dist/info.json";
-    const packageJson = JSON.parse(await fs.readFile("./package.json", "utf-8"));
-
     const hbcVersion = await getHermesBytecodeVersion();
 
     await fs.writeFile(
