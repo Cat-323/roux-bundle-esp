@@ -7,10 +7,9 @@ import { FluxUtils } from "@metro/common";
 import { Card, Stack, TableRow, TableRowGroup, Text } from "@metro/common/components";
 import { UserStore } from "@metro/common/stores";
 import { developer } from "@plugins/types";
-import { Developers } from "@rain/Developers";
+import { Contributors, Developers } from "@rain/Developers";
 import { useMemo } from "react";
 import { Image, ScrollView, View } from "react-native";
-
 
 const showUserProfileActionSheet = findByName("showUserProfileActionSheet");
 const { getUser: maybeFetchUser } = lazyDestructure(() => findByProps("getUser", "fetchProfile"));
@@ -18,112 +17,79 @@ const { getUser: maybeFetchUser } = lazyDestructure(() => findByProps("getUser",
 type Credit = {
     name: string;
     role: string;
-    dev: developer;
+    dev?: developer;
 };
 
+// Se vinculan tus cuentas principales y las de los testers
 const developers: Credit[] = [
-    { name: "cocobo1", role: "Founder & Main Developer", dev: Developers.cocobo1 },
-    { name: "bwlok", role: Strings.RAIN_DEVELOPER, dev: Developers.Bwlok },
-    { name: "kmmiio99o", role: Strings.RAIN_DEVELOPER, dev: Developers.kmmiio99o },
-    { name: "CatStars", role: Strings.RAIN_DEVELOPER, dev: Developers.SerStars },
-    { name: "J", role: Strings.RAIN_DEVELOPER, dev: Developers.j },
-    { name: "Reyyan", role: Strings.RAIN_DEVELOPER, dev: Developers.reyyan1 },
-    { name: "John", role: Strings.RAIN_DEVELOPER, dev: Developers.John },
-    { name: "Livie", role: Strings.RAIN_DEVELOPER, dev: Developers.Livie }
-];
+    { name: "Roux", role: "Desarrollador Principal", dev: (Developers as any)?.CatMain },
+    { name: "Mr cat", role: "Desarrollador", dev: (Developers as any)?.CatAlt }
+].filter(d => Boolean(d.dev));
 
-const donators = [
-    "Chocolate Milk",
-    "Chloe~♥",
-    "bruhours",
-    "Mezque",
-    "Fizz",
-    "snp",
-    "Clover",
-    "Stella",
-    "Twimble Time Mods",
-    "Bread Cat",
-    "/usr/choccy-chan ツ",
-    "the-ocean-in-motion",
-    "han",
-    "nyx",
-    "force",
-    "Plank",
-    "Ibby"
+const testers: Credit[] = [
+    { name: "🐾Ari🐾", role: "Tester", dev: (Contributors as any)?.Tester1 },
+    { name: "𝕭𝖚𝖈𝖆𝖗𝖊𝖑𝖎 𝟜𝟟𝟛", role: "Tester", dev: (Contributors as any)?.Tester2 }
+].filter(d => Boolean(d.dev));
 
-];
+const getUserId = (dev?: developer): string | null => {
+    if (!dev?.id) return null;
+    return String(dev.id).replace(/n$/, "");
+};
 
 export default function DevelopersPage() {
-    const accentColor = resolveSemanticColor(semanticColors.BACKGROUND_ACCENT);
-    const hexAlpha = (hex: string, alpha: string) => hex + alpha;
-
-    const handleProfilePress = (dev: developer) => {
-        if (dev.id) {
-            showUserProfileActionSheet({ userId: dev.id });
+    const handleProfilePress = (dev?: developer) => {
+        const id = getUserId(dev);
+        if (id) {
+            try {
+                showUserProfileActionSheet({ userId: id });
+            } catch (e) {
+                console.error("Error al abrir perfil:", e);
+            }
         }
     };
 
-    const users: any[] = FluxUtils.useStateFromStoresArray([UserStore], () => {
-        developers.forEach(d => d.dev.id && maybeFetchUser(d.dev.id));
-        return developers.map(d => d.dev.id ? UserStore.getUser(d.dev.id) : null);
-    });
+    const allCredits = useMemo(() => [...developers, ...testers], []);
+
+    // Consulta y resolución dinámica de perfiles desde la caché de Discord
+    const userMap: Record<string, any> = FluxUtils.useStateFromStoresArray([UserStore], () => {
+        const mapped: Record<string, any> = {};
+        for (const item of allCredits) {
+            const id = getUserId(item.dev);
+            if (id) {
+                try {
+                    maybeFetchUser?.(id);
+                } catch {}
+                mapped[id] = UserStore.getUser(id);
+            }
+        }
+        return [mapped];
+    })[0] || {};
 
     const getDiscordAvatar = (user: any): string | undefined => {
         if (!user?.avatar) return undefined;
         return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`;
     };
 
-    const randomHearts = useMemo(() => {
-        const hearts: { top: number; left: number; size: number; opacity: number }[] = [];
-        const heartCount = 24;
-        const minSize = 20;
-        const maxSize = 36;
-        const margin = 10;
-        const cardWidth = 600;
-        const cardHeight = 250;
-
-        for (let i = 0; i < heartCount; i++) {
-            const size = minSize + Math.random() * (maxSize - minSize);
-            let top: number;
-            let left: number;
-            let attempts = 0;
-            const maxAttempts = 50;
-
-            do {
-                top = margin + Math.random() * (cardHeight - size - margin * 2);
-                left = margin + Math.random() * (cardWidth - size - margin * 2);
-                attempts++;
-            } while (
-                attempts < maxAttempts &&
-                hearts.some(h => {
-                    const dx = Math.abs(top - h.top);
-                    const dy = Math.abs(left - h.left);
-                    const minDist = (size + h.size) / 2 + 5;
-                    return dx < minDist && dy < minDist;
-                })
-            );
-
-            hearts.push({
-                top,
-                left,
-                size,
-                opacity: 0.08 + Math.random() * 0.1,
-            });
-        }
-        return hearts;
-    }, []);
+    const getDisplayName = (item: Credit, user: any): string => {
+        return user?.globalName || user?.username || item.name;
+    };
 
     return (
         <ScrollView style={{ flex: 1 }}>
             <Stack style={{ paddingVertical: 24, paddingHorizontal: 12 }} spacing={24}>
-                <TableRowGroup title="Developers">
-                    {developers.map((dev, index) => {
-                        const avatarUrl = getDiscordAvatar(users[index]);
+                {/* Cuadro de Desarrolladores */}
+                <TableRowGroup title="Desarrolladores">
+                    {developers.map(devItem => {
+                        const id = getUserId(devItem.dev);
+                        const discordUser = id ? userMap[id] : null;
+                        const avatarUrl = getDiscordAvatar(discordUser);
+                        const displayName = getDisplayName(devItem, discordUser);
+
                         return (
                             <TableRow
-                                key={dev.name}
-                                label={dev.name}
-                                subLabel={dev.role}
+                                key={id || devItem.name}
+                                label={displayName}
+                                subLabel={devItem.role}
                                 icon={
                                     avatarUrl ? (
                                         <Image
@@ -131,57 +97,51 @@ export default function DevelopersPage() {
                                             style={{
                                                 width: 48,
                                                 height: 48,
-                                                borderRadius: 8,
+                                                borderRadius: 24,
                                             }}
                                         />
                                     ) : undefined
                                 }
-                                onPress={() => handleProfilePress(dev.dev)}
+                                onPress={() => handleProfilePress(devItem.dev)}
                                 arrow
                             />
                         );
                     })}
                 </TableRowGroup>
 
-                <Card>
-                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" }}>
-                        {randomHearts.map((heart, i) => (
-                            <Image
-                                key={i}
-                                source={findAssetId("HeartIcon")}
-                                style={{
-                                    position: "absolute",
-                                    top: heart.top,
-                                    left: heart.left,
-                                    width: heart.size,
-                                    height: heart.size,
-                                    tintColor: resolveSemanticColor(semanticColors.BACKGROUND_ACCENT),
-                                    opacity: heart.opacity,
-                                }}
-                            />
-                        ))}
-                    </View>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 16 }}>
-                        <Text variant="text-md/semibold" style={{ color: "text-default" }}>Donators</Text>
-                    </View>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                        {donators.map(donator => (
-                            <View
-                                key={donator}
-                                style={{
-                                    paddingVertical: 6,
-                                    paddingHorizontal: 12,
-                                    borderRadius: 16,
-                                    backgroundColor: hexAlpha(accentColor, "50"),
-                                    borderWidth: 1,
-                                    borderColor: hexAlpha(accentColor, "70"),
-                                }}
-                            >
-                                <Text variant="text-sm/normal" style={{ color: "text-default" }}>{donator}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </Card>
+                {/* Cuadro de Testers */}
+                {testers.length > 0 && (
+                    <TableRowGroup title="Testers">
+                        {testers.map(testerItem => {
+                            const id = getUserId(testerItem.dev);
+                            const discordUser = id ? userMap[id] : null;
+                            const avatarUrl = getDiscordAvatar(discordUser);
+                            const displayName = getDisplayName(testerItem, discordUser);
+
+                            return (
+                                <TableRow
+                                    key={id || testerItem.name}
+                                    label={displayName}
+                                    subLabel={testerItem.role}
+                                    icon={
+                                        avatarUrl ? (
+                                            <Image
+                                                source={{ uri: avatarUrl }}
+                                                style={{
+                                                    width: 48,
+                                                    height: 48,
+                                                    borderRadius: 24,
+                                                }}
+                                            />
+                                        ) : undefined
+                                    }
+                                    onPress={() => handleProfilePress(testerItem.dev)}
+                                    arrow
+                                />
+                            );
+                        })}
+                    </TableRowGroup>
+                )}
             </Stack>
         </ScrollView>
     );
