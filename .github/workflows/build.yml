@@ -42,6 +42,7 @@ jobs:
             "src/global.d.ts"
             "src/lib/index.ts"
             "src/rain/i18n/index.ts"
+            "package.json"
           )
 
           git config user.name "github-actions[bot]"
@@ -122,37 +123,54 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: node scripts/translate.mjs
 
-      - name: Preparar versión e inyectar en package.json
+      - name: Incrementar versión y guardar en repositorio
         if: steps.upstream.outputs.changed == 'true'
         id: meta
         run: |
           set -euo pipefail
-          
-          # Limpiar compilaciones anteriores locales
           rm -rf dist
 
-          # 1. Base (ej: 1.0)
-          BASE_VERSION="$(node -e '
-            try {
-              const v = require("./package.json").version || "1.0.0";
-              const parts = v.replace(/^v/, "").split(".");
-              console.log(`${parts[0] || "1"}.${parts[1] || "0"}`);
-            } catch { console.log("1.0"); }
-          ')"
+          # 1. Calcular incremento de versión de 3 números (máximo 9 en el último dígito)
+          NEXT_RAW=$(node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            
+            let v = (pkg.version || "1.0.1").replace(/^v/, "").trim();
+            let [major, minor, patch] = v.split(".").map(n => parseInt(n, 10));
 
-          # 2. Contador numérico limpio (sin sufijos -fix o -new)
-          RAIN_LEVEL="$(git rev-list --count "upstream/$UPSTREAM_BRANCH")"
-          RAW_VERSION="${BASE_VERSION}.${RAIN_LEVEL}"
-          VERSION="v${RAW_VERSION}"
+            if (isNaN(major)) major = 1;
+            if (isNaN(minor)) minor = 0;
+            if (isNaN(patch)) patch = 1;
+
+            // Sube de 1 en 1 hasta 9. Al pasar de 9, aumenta minor (1.0.x -> 1.1.0)
+            if (patch >= 9) {
+              patch = 0;
+              if (minor >= 9) {
+                major += 1;
+                minor = 0;
+              } else {
+                minor += 1;
+              }
+            } else {
+              patch += 1;
+            }
+
+            const nextVersion = `${major}.${minor}.${patch}`;
+            pkg.version = nextVersion;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            process.stdout.write(nextVersion);
+          ')
+
+          VERSION="v${NEXT_RAW}"
+
+          # 2. Hacer commit y push para que el cambio persista en el repositorio
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): bump version to ${VERSION} [skip ci]" || true
+          git push origin "HEAD:${{ github.ref_name }}"
+
           CURRENT_COMMIT="$(git rev-parse --short HEAD)"
-
-          # Inyectar versión en package.json antes del build para que el bundle la incluya
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${RAW_VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$CURRENT_COMMIT" >> "$GITHUB_OUTPUT"
@@ -175,7 +193,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Elimina el release y el tag viejo en GitHub para evitar archivos en caché
           gh release delete latest --cleanup-tag -y 2>/dev/null || true
           git tag -d latest 2>/dev/null || true
           git push origin :refs/tags/latest 2>/dev/null || true
@@ -186,8 +203,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag latest HEAD
-          git push origin refs/tags/latest
+          git tag -f latest HEAD
+          git push origin refs/tags/latest -f
 
       - name: Publicar release 'latest'
         if: steps.upstream.outputs.changed == 'true'
