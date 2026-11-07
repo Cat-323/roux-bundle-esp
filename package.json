@@ -67,5 +67,6 @@
     "@swc/core",
     "electron",
     "esbuild"
-  ]
+  ],
+  "version": "1.0.2"
 }
