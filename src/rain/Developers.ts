@@ -1,6 +1,6 @@
 import { developer } from "@plugins/types";
 
-export const Developers = {
+const devs = {
     CatMain: {
         name: "Roux",
         id: 532237759851528192n,
@@ -11,7 +11,7 @@ export const Developers = {
     }
 } satisfies Record<string, developer>;
 
-export const Contributors = {
+const contribs = {
     Tester1: {
         name: "🐾Ari🐾",
         id: 1466486111588057381n,
@@ -21,3 +21,19 @@ export const Contributors = {
         id: 1187280817551069198n,
     }
 } satisfies Record<string, developer>;
+
+// Proxy de seguridad: si Developers.tsx busca una clave vieja (ej. "cocobo1"), 
+// devuelve tu cuenta principal en lugar de undefined para evitar el crash.
+export const Developers: Record<string, developer> = new Proxy(devs as any, {
+    get(target, prop: string) {
+        if (prop in target) return target[prop];
+        return target.CatMain;
+    }
+});
+
+export const Contributors: Record<string, developer> = new Proxy(contribs as any, {
+    get(target, prop: string) {
+        if (prop in target) return target[prop];
+        return target.Tester1;
+    }
+});
