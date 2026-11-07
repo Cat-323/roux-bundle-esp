@@ -61,14 +61,12 @@ jobs:
             RAIN_HAS_NEW=1
           fi
 
-          # En cron: solo compila si Rain tiene cambios
           if [ "$EVENT_NAME" = "schedule" ] && [ "$RAIN_HAS_NEW" -eq 0 ]; then
             echo "El upstream no tiene commits nuevos. No hay nada que compilar."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Si Rain tiene cambios, fusionar
           if [ "$RAIN_HAS_NEW" -eq 1 ]; then
             echo "Commits nuevos en upstream:"
             git log --oneline "HEAD..upstream/$UPSTREAM_BRANCH" | head -20
@@ -121,7 +119,7 @@ jobs:
         if: steps.upstream.outputs.changed == 'true'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: node scripts/translate.mjs
+        run: node scripts/translate.mjs || true
 
       - name: Incrementar versión y guardar en repositorio
         if: steps.upstream.outputs.changed == 'true'
@@ -130,7 +128,6 @@ jobs:
           set -euo pipefail
           rm -rf dist
 
-          # 1. Calcular incremento de versión de 3 números (máximo 9 en el último dígito)
           NEXT_RAW=$(node -e '
             const fs = require("fs");
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
@@ -142,7 +139,6 @@ jobs:
             if (isNaN(minor)) minor = 0;
             if (isNaN(patch)) patch = 1;
 
-            // Sube de 1 en 1 hasta 9. Al pasar de 9, aumenta minor (1.0.x -> 1.1.0)
             if (patch >= 9) {
               patch = 0;
               if (minor >= 9) {
@@ -163,7 +159,6 @@ jobs:
 
           VERSION="v${NEXT_RAW}"
 
-          # 2. Hacer commit y push para que el cambio persista en el repositorio
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json
@@ -178,6 +173,22 @@ jobs:
       - name: Compilar bundle + bytecode de Hermes
         if: steps.upstream.outputs.changed == 'true'
         run: bun run build --release-branch=main --build-bytecode
+
+      - name: Inyectar paths y version en info.json
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          node -e '
+            const fs = require("fs");
+            const infoPath = "dist/info.json";
+            let info = {};
+            if (fs.existsSync(infoPath)) {
+              info = JSON.parse(fs.readFileSync(infoPath, "utf8"));
+            }
+            info.paths = fs.readdirSync("dist");
+            info.version = "${{ steps.meta.outputs.version }}".replace(/^v/, "").trim();
+            fs.writeFileSync(infoPath, JSON.stringify(info, null, 2));
+            console.log("dist/info.json generado para el loader:\n", JSON.stringify(info, null, 2));
+          '
 
       - name: Obtener hash del bundle
         if: steps.upstream.outputs.changed == 'true'
