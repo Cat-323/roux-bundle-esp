@@ -50,15 +50,6 @@ jobs:
           git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
           git fetch upstream "$UPSTREAM_BRANCH"
 
-          # Detectar si fue un cambio directo tuyo
-          IS_USER_PUSH=0
-          if [ "$EVENT_NAME" = "push" ]; then
-            LAST_AUTHOR="$(git log -1 --pretty=format:'%an')"
-            if [ "$LAST_AUTHOR" != "github-actions[bot]" ]; then
-              IS_USER_PUSH=1
-            fi
-          fi
-
           if ! BASE="$(git merge-base HEAD "upstream/$UPSTREAM_BRANCH" 2>/dev/null)"; then
             echo "::error::Este repositorio no comparte historial con $UPSTREAM_URL."
             exit 1
@@ -73,7 +64,6 @@ jobs:
           if [ "$EVENT_NAME" = "schedule" ] && [ "$RAIN_HAS_NEW" -eq 0 ]; then
             echo "El upstream no tiene commits nuevos. No hay nada que compilar."
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "is_user_push=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -109,7 +99,6 @@ jobs:
           fi
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "is_user_push=$IS_USER_PUSH" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
         if: steps.upstream.outputs.changed == 'true'
@@ -133,18 +122,14 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: node scripts/translate.mjs
 
-      - name: Compilar bundle + bytecode de Hermes
-        if: steps.upstream.outputs.changed == 'true'
-        run: bun run build --release-branch=main --build-bytecode
-
-      - name: Preparar datos del release y subir nivel
+      - name: Preparar versión e inyectar en package.json
         if: steps.upstream.outputs.changed == 'true'
         id: meta
-        env:
-          IS_USER_PUSH: ${{ steps.upstream.outputs.is_user_push }}
         run: |
           set -euo pipefail
-          ls -la dist
+          
+          # Limpiar compilaciones anteriores locales
+          rm -rf dist
 
           # 1. Base (ej: 1.0)
           BASE_VERSION="$(node -e '
@@ -155,38 +140,56 @@ jobs:
             } catch { console.log("1.0"); }
           ')"
 
-          # 2. Contador de commits de Rain (+1 por cada actualización)
+          # 2. Contador numérico limpio (sin sufijos -fix o -new)
           RAIN_LEVEL="$(git rev-list --count "upstream/$UPSTREAM_BRANCH")"
-
-          # 3. Sufijo según cambios propios
-          SUFFIX=""
-          if [ "$IS_USER_PUSH" = "1" ]; then
-            MSG="$(git log -1 --pretty=format:'%s' | tr '[:upper:]' '[:lower:]')"
-            if [[ "$MSG" =~ (feat|add|new|nuevo) ]]; then
-              SUFFIX="-new"
-            else
-              SUFFIX="-fix"
-            fi
-          fi
-
-          VERSION="v${BASE_VERSION}.${RAIN_LEVEL}${SUFFIX}"
-          HASH="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync("dist/info.json","utf8")).hash||"")}catch{console.log("")}')"
+          RAW_VERSION="${BASE_VERSION}.${RAIN_LEVEL}"
+          VERSION="v${RAW_VERSION}"
           CURRENT_COMMIT="$(git rev-parse --short HEAD)"
 
+          # Inyectar versión en package.json antes del build para que el bundle la incluya
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${RAW_VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "commit=$CURRENT_COMMIT" >> "$GITHUB_OUTPUT"
 
-      - name: Mover el tag 'latest' al commit compilado
+      - name: Compilar bundle + bytecode de Hermes
+        if: steps.upstream.outputs.changed == 'true'
+        run: bun run build --release-branch=main --build-bytecode
+
+      - name: Obtener hash del bundle
+        if: steps.upstream.outputs.changed == 'true'
+        id: bundle_meta
+        run: |
+          set -euo pipefail
+          ls -la dist
+          HASH="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync("dist/info.json","utf8")).hash||"")}catch{console.log("")}')"
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Purgar release y tag 'latest' anteriores
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Elimina el release y el tag viejo en GitHub para evitar archivos en caché
+          gh release delete latest --cleanup-tag -y 2>/dev/null || true
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+
+      - name: Crear tag 'latest' limpio
         if: steps.upstream.outputs.changed == 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f latest HEAD
-          git push -f origin refs/tags/latest
+          git tag latest HEAD
+          git push origin refs/tags/latest
 
-      - name: Publicar / actualizar release 'latest'
+      - name: Publicar release 'latest'
         if: steps.upstream.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
@@ -197,7 +200,7 @@ jobs:
 
             - **Versión:** `${{ steps.meta.outputs.version }}`
             - **Commit:** `${{ steps.meta.outputs.commit }}`
-            - **SHA-256 del bundle:** `${{ steps.meta.outputs.hash }}`
+            - **SHA-256 del bundle:** `${{ steps.bundle_meta.outputs.hash }}`
           files: dist/*
           fail_on_unmatched_files: true
           make_latest: "true"
