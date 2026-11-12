@@ -187,7 +187,7 @@ export function reconnectNow() {
 export default definePlugin({
     name: "RouxPresence",
     description: "Sincroniza tus juegos y música en tiempo real con RouxManager.",
-    author: [{ name: "Eduardo Gabriel", id: "0" }],
+    author: [{ name: "Mr Cat", id: "0" }],
     id: "rouxpresence",
     version: "1.0.0",
     start() {
